@@ -1,0 +1,32 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/.pytest_cache/
+
+# Database
+backend/*.db
+
+# ML cache
+backend/app/ml/*.joblib
+
+# Environment
+.env
+.env.local
+*.env
+
+# Node
+frontend/node_modules/
+
+# Vite
+frontend/dist/
+
+# Python cache
+*.py[cod]
+__pycache__/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
