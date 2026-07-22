@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Download, Volume2, ShieldAlert, HeartPulse, RefreshCw, ChevronLeft, ArrowRight, Hospital, ListChecks, HelpCircle } from "lucide-react";
-import html2pdf from "html2pdf.js";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import { translations } from "../translations";
 import SeverityBadge from "../components/SeverityBadge";
 import HospitalFinder from "../components/HospitalFinder";
@@ -34,18 +35,258 @@ export default function Results({ triageResult, setCurrentPage, language }) {
   const confidencePct = Math.round(triageResult.confidence * 100);
 
   const handleDownloadPDF = () => {
-    const reportNode = document.getElementById("triage-report");
-    if (!reportNode) return;
+    if (!triageResult) return;
 
-    const opt = {
-      margin: 0.3,
-      filename: `MedAssist_Triage_${triageResult.predicted_disease.replace(/\s+/g, '_')}_Report.pdf`,
-      image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
-    };
+    // Create portrait, millimeter-unit, letter-size jsPDF document
+    const doc = new jsPDF("p", "mm", "letter");
 
-    html2pdf().from(reportNode).set(opt).save();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Format assessment datetime and report filename
+    const assessmentDate = triageResult.created_at ? new Date(triageResult.created_at) : new Date();
+    const yyyy = assessmentDate.getFullYear();
+    const mm = String(assessmentDate.getMonth() + 1).padStart(2, "0");
+    const dd = String(assessmentDate.getDate()).padStart(2, "0");
+    const formattedDate = `${yyyy}-${mm}-${dd}`;
+    const formattedDateTime = assessmentDate.toLocaleString();
+
+    // 1. Branding Header Banner (Deep Slate Theme)
+    doc.setFillColor(30, 41, 59); // Slate 800
+    doc.rect(0, 0, pageWidth, 40, "F");
+
+    // Title text
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.text("MedAssist AI", 15, 18);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(203, 213, 225); // Slate 300
+    doc.text("Clinical Assessment & Triage Report", 15, 25);
+
+    // Right-aligned header metadata
+    doc.setFontSize(9);
+    doc.setTextColor(241, 245, 249); // Slate 100
+    doc.text(`Assessment Date: ${formattedDateTime}`, pageWidth - 15, 18, { align: "right" });
+    doc.text("System: Random Forest AI Classification Engine", pageWidth - 15, 24, { align: "right" });
+
+    // Section 1: Patient Intake Parameters
+    let currentY = 50;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("1. Patient Intake Parameters", 15, currentY);
+
+    doc.setDrawColor(226, 232, 240); // Slate 200
+    doc.setLineWidth(0.5);
+    doc.line(15, currentY + 2, pageWidth - 15, currentY + 2);
+    currentY += 6;
+
+    // Intake Details Table
+    autoTable(doc, {
+      startY: currentY,
+      theme: "plain",
+      styles: { fontSize: 9.5, cellPadding: 3 },
+      columnStyles: {
+        0: { fontStyle: "bold", textColor: [100, 116, 139], width: 35 },
+        1: { textColor: [30, 41, 59], width: 55 },
+        2: { fontStyle: "bold", textColor: [100, 116, 139], width: 35 },
+        3: { textColor: [30, 41, 59] }
+      },
+      body: [
+        [
+          "Age:", `${triageResult.age || "N/A"} years`, 
+          "Gender:", triageResult.gender || "N/A"
+        ],
+        [
+          "Symptom Duration:", triageResult.duration || "N/A", 
+          "Medical History:", triageResult.medical_history || "None reported"
+        ]
+      ]
+    });
+
+    currentY = doc.lastAutoTable.finalY + 8;
+
+    // Optional Emergency Warning Banner (High Acuity)
+    if (triageResult.emergency_warning) {
+      autoTable(doc, {
+        startY: currentY,
+        theme: "plain",
+        styles: { cellPadding: 4, fontSize: 10 },
+        body: [
+          [
+            {
+              content: "EMERGENCY WARNING TRIGGERED\nThe clinical indicators suggest a high-acuity crisis. Activate emergency services immediately.",
+              styles: {
+                fillColor: [254, 242, 242], // Light red
+                textColor: [220, 38, 38], // Red
+                fontStyle: "bold",
+                lineWidth: 0.5,
+                drawColor: [254, 202, 202] // Red border
+              }
+            }
+          ]
+        ]
+      });
+      currentY = doc.lastAutoTable.finalY + 8;
+    }
+
+    // Section 2: Clinical Findings & AI Classification
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("2. Clinical Findings & AI Classification", 15, currentY);
+
+    doc.line(15, currentY + 2, pageWidth - 15, currentY + 2);
+    currentY += 6;
+
+    // Severity coloring setup
+    const severityLower = (triageResult.severity || "").toLowerCase();
+    const severityColor = severityLower === "high" 
+      ? [225, 29, 72] // Rose
+      : severityLower === "medium"
+        ? [217, 119, 6] // Amber
+        : [5, 150, 105]; // Emerald
+
+    const severityBgColor = severityLower === "high" 
+      ? [254, 242, 242] 
+      : severityLower === "medium" 
+        ? [255, 251, 235] 
+        : [240, 253, 250];
+
+    autoTable(doc, {
+      startY: currentY,
+      theme: "striped",
+      styles: { fontSize: 9.5, cellPadding: 4 },
+      headStyles: { fillColor: [13, 148, 136], textColor: [255, 255, 255], fontStyle: "bold" },
+      columnStyles: {
+        0: { fontStyle: "bold", width: 50 },
+        1: { textColor: [30, 41, 59] }
+      },
+      head: [["Assessment Metric", "AI Model Outcome"]],
+      body: [
+        ["Predicted Condition", triageResult.predicted_disease || "Unknown"],
+        ["Confidence Score", `${confidencePct}% Probability`],
+        [
+          "Urgency Severity Level", 
+          { 
+            content: (triageResult.severity || "Low").toUpperCase(), 
+            styles: { 
+              textColor: severityColor, 
+              fontStyle: "bold",
+              fillColor: severityBgColor
+            } 
+          }
+        ],
+        ["Recommended Department", triageResult.recommended_department || "General Practice"]
+      ]
+    });
+
+    currentY = doc.lastAutoTable.finalY + 8;
+
+    // Section 3: Evaluated Symptoms & Possible Causes
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("3. Evaluated Symptoms & Possible Causes", 15, currentY);
+
+    doc.line(15, currentY + 2, pageWidth - 15, currentY + 2);
+    currentY += 6;
+
+    const symptomsString = (triageResult.symptoms || []).join(", ");
+    const causesList = (triageResult.possible_causes || []).join("\n");
+
+    autoTable(doc, {
+      startY: currentY,
+      theme: "grid",
+      styles: { fontSize: 9, cellPadding: 4, valign: "top" },
+      headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontStyle: "bold" },
+      columnStyles: {
+        0: { width: (pageWidth - 30) / 2 },
+        1: { width: (pageWidth - 30) / 2 }
+      },
+      head: [["Symptoms Evaluated", "Possible Clinical Causes"]],
+      body: [[symptomsString || "None selected", causesList || "No possible causes listed"]]
+    });
+
+    currentY = doc.lastAutoTable.finalY + 8;
+
+    // Section 4: Recommended Actions & First Aid
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text("4. Recommended Actions & First Aid", 15, currentY);
+
+    doc.line(15, currentY + 2, pageWidth - 15, currentY + 2);
+    currentY += 6;
+
+    const firstAidRows = (triageResult.first_aid || []).map((step, idx) => [`${idx + 1}.`, step]);
+
+    autoTable(doc, {
+      startY: currentY,
+      theme: "plain",
+      styles: { fontSize: 9, cellPadding: 2.5, valign: "top" },
+      columnStyles: {
+        0: { fontStyle: "bold", width: 8, textColor: [225, 29, 72] }, // Red numbers
+        1: { textColor: [30, 41, 59] }
+      },
+      body: firstAidRows.length > 0 ? firstAidRows : [["-", "No first aid instructions available."]]
+    });
+
+    currentY = doc.lastAutoTable.finalY + 6;
+
+    // Suggested Next Action Box
+    autoTable(doc, {
+      startY: currentY,
+      theme: "plain",
+      styles: { cellPadding: 4, fontSize: 9.5 },
+      body: [
+        [
+          {
+            content: `SUGGESTED NEXT ACTION:\n${triageResult.suggested_next_action || "Consult a healthcare professional."}`,
+            styles: {
+              fillColor: [240, 253, 250], // Light teal
+              textColor: [13, 148, 136], // Teal
+              fontStyle: "bold",
+              lineWidth: 0.5,
+              drawColor: [153, 246, 228] // Teal border
+            }
+          }
+        ]
+      ]
+    });
+
+    // 5. Apply Headers & Footers to all generated pages dynamically
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      
+      // Footer divider line
+      doc.setDrawColor(226, 232, 240); // Slate 200
+      doc.setLineWidth(0.5);
+      doc.line(15, pageHeight - 20, pageWidth - 15, pageHeight - 20);
+
+      // Disclaimer Text
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184); // Slate 400
+      
+      const disclaimer1 = "Disclaimer: MedAssist AI is for educational and guidance purposes only.";
+      const disclaimer2 = "In case of a serious life-threatening medical situation, immediately call emergency services.";
+      
+      doc.text(disclaimer1, 15, pageHeight - 15);
+      doc.text(disclaimer2, 15, pageHeight - 11);
+
+      // Page Number
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.text(`Page ${i} of ${pageCount}`, pageWidth - 15, pageHeight - 13, { align: "right" });
+    }
+
+    const filename = `MedAssist_Report_${formattedDate}.pdf`;
+    doc.save(filename);
   };
 
   const handleTextToSpeech = () => {
