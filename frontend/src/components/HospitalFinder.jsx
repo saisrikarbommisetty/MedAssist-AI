@@ -28,13 +28,87 @@ export default function HospitalFinder({ language }) {
     { name: "County Medical Plaza", address: "East Boulevard Road 50, Metro City", distance: 4.1 }
   ];
 
+  const fetchHospitals = async (latitude, longitude) => {
+    const maxRetries = 3;
+    let attempt = 0;
+    
+    // Query OSM Overpass API for hospitals (nodes, ways, and relations) within an 8km (8000m) radius
+    const query = `[out:json][timeout:25];(node["amenity"="hospital"](around:8000,${latitude},${longitude});way["amenity"="hospital"](around:8000,${latitude},${longitude});relation["amenity"="hospital"](around:8000,${latitude},${longitude}););out center;`;
+    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+    while (attempt < maxRetries) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`OSM HTTP error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        if (data && data.elements) {
+          const results = data.elements
+            .map(el => {
+              const tags = el.tags || {};
+              const name = tags.name || tags["name:en"] || "Unnamed Hospital";
+              const street = tags["addr:street"] || "";
+              const housenumber = tags["addr:housenumber"] || "";
+              const city = tags["addr:city"] || "";
+              
+              const address = [housenumber, street, city].filter(Boolean).join(", ") || "Location details not indexed";
+              
+              // Extract lat/lon from center for ways/relations, or direct lat/lon for nodes
+              const lat = el.lat || (el.center && el.center.lat);
+              const lon = el.lon || (el.center && el.center.lon);
+              
+              if (lat === undefined || lon === undefined) return null;
+              
+              const dist = calculateDistance(latitude, longitude, lat, lon);
+              
+              return {
+                name,
+                address,
+                distance: parseFloat(dist.toFixed(1)),
+                lat,
+                lon
+              };
+            })
+            .filter(Boolean); // Filter out any null nodes
+          
+          if (results.length > 0) {
+            // Sort by nearest
+            results.sort((a, b) => a.distance - b.distance);
+            setHospitals(results.slice(0, 4));
+            setError(null);
+          } else {
+            setError("No nearby hospitals found within 8km of your location.");
+            setHospitals([]); // Clear hospitals, do not show default/fallback list
+          }
+          setLoading(false);
+          return;
+        } else {
+          throw new Error("Invalid response format received from Overpass API.");
+        }
+      } catch (err) {
+        attempt++;
+        console.warn(`OSM fetch attempt ${attempt} failed:`, err);
+        if (attempt >= maxRetries) {
+          setError("Failed to fetch nearby hospitals after retries. Showing default centers.");
+          setHospitals(fallbackHospitals); // Show fallback hospitals because API query failed after retries
+          setLoading(false);
+          return;
+        }
+        // Wait 1.5 seconds before retrying
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    }
+  };
+
   const detectLocationAndSearch = () => {
     setLoading(true);
     setError(null);
     setSearched(true);
 
     if (!navigator.geolocation) {
-      setError("Geolocation is not supported by your browser.");
+      setError("Geolocation is not supported by your browser. Showing default centers.");
       setHospitals(fallbackHospitals);
       setLoading(false);
       return;
@@ -43,59 +117,19 @@ export default function HospitalFinder({ language }) {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
-        try {
-          // Query OSM Overpass API for hospitals within a 8km (8000m) radius
-          const query = `[out:json];node["amenity"="hospital"](around:8000,${latitude},${longitude});out;`;
-          const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-          
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error("Failed to query OpenStreetMap server.");
-          }
-          
-          const data = await response.json();
-          if (data && data.elements && data.elements.length > 0) {
-            const results = data.elements.map(el => {
-              const name = el.tags.name || el.tags["name:en"] || "Unnamed Hospital";
-              const street = el.tags["addr:street"] || "";
-              const housenumber = el.tags["addr:housenumber"] || "";
-              const city = el.tags["addr:city"] || "";
-              
-              const address = [housenumber, street, city].filter(Boolean).join(", ") || "Location details not indexed";
-              const dist = calculateDistance(latitude, longitude, el.lat, el.lon);
-              
-              return {
-                name,
-                address,
-                distance: parseFloat(dist.toFixed(1)),
-                lat: el.lat,
-                lon: el.lon
-              };
-            });
-            
-            // Sort by nearest
-            results.sort((a, b) => a.distance - b.distance);
-            // Limit to 4 results
-            setHospitals(results.slice(0, 4));
-          } else {
-            setError("No hospitals indexed close to your location in OpenStreetMap.");
-            setHospitals(fallbackHospitals);
-          }
-        } catch (err) {
-          console.error("OSM error:", err);
-          setError("Failed to fetch nearby hospitals. Showing default centers.");
-          setHospitals(fallbackHospitals);
-        } finally {
-          setLoading(false);
-        }
+        await fetchHospitals(latitude, longitude);
       },
       (geoErr) => {
-        console.error("Geo error:", geoErr);
-        setError("Location permission denied. Showing default centers.");
+        console.error("Geo location detection error:", geoErr);
+        if (geoErr.code === geoErr.PERMISSION_DENIED) {
+          setError("Location permission denied. Showing default centers.");
+        } else {
+          setError("Could not retrieve your location. Showing default centers.");
+        }
         setHospitals(fallbackHospitals);
         setLoading(false);
       },
-      { timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
     );
   };
 

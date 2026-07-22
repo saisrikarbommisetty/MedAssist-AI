@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { HashRouter, useNavigate, useLocation } from "react-router-dom";
 import Header from "./components/Header";
 import Footer from "./components/Footer";
 import Home from "./pages/Home";
@@ -8,23 +9,30 @@ import FirstAid from "./pages/FirstAid";
 import About from "./pages/About";
 import { translations } from "./translations";
 
-export default function App() {
-  const [currentPage, setCurrentPage] = useState("home");
-  const [triageResult, setTriageResult] = useState(null);
-  const [language, setLanguage] = useState("en");
-  const [darkMode, setDarkMode] = useState(false);
+function AppContent({
+  triageResult,
+  setTriageResult,
+  language,
+  setLanguage,
+  darkMode,
+  setDarkMode
+}) {
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  // Initialize theme from localStorage on load
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("theme") || "light";
-    if (savedTheme === "dark") {
-      setDarkMode(true);
-      document.body.classList.add("dark");
-    } else {
-      setDarkMode(false);
-      document.body.classList.remove("dark");
-    }
-  }, []);
+  // Helper to determine active page ID from the path segment
+  const getPageFromPath = (path) => {
+    const cleanPath = path.replace(/^\//, "");
+    if (!cleanPath || cleanPath === "home") return "home";
+    return cleanPath;
+  };
+
+  const currentPage = getPageFromPath(location.pathname);
+
+  // Sync route whenever manual navigation is triggered by sub-components
+  const setCurrentPage = (page) => {
+    navigate("/" + page);
+  };
 
   const renderPage = () => {
     switch (currentPage) {
@@ -75,5 +83,48 @@ export default function App() {
       {/* Footer Banner */}
       <Footer language={language} />
     </div>
+  );
+}
+
+export default function App() {
+  const [triageResult, setTriageResult] = useState(() => {
+    const saved = sessionStorage.getItem("triageResult");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [language, setLanguage] = useState("en");
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Initialize theme from localStorage on load
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme") || "light";
+    if (savedTheme === "dark") {
+      setDarkMode(true);
+      document.body.classList.add("dark");
+    } else {
+      setDarkMode(false);
+      document.body.classList.remove("dark");
+    }
+  }, []);
+
+  // Persist assessment result when it changes
+  useEffect(() => {
+    if (triageResult) {
+      sessionStorage.setItem("triageResult", JSON.stringify(triageResult));
+    } else {
+      sessionStorage.removeItem("triageResult");
+    }
+  }, [triageResult]);
+
+  return (
+    <HashRouter>
+      <AppContent
+        triageResult={triageResult}
+        setTriageResult={setTriageResult}
+        language={language}
+        setLanguage={setLanguage}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+      />
+    </HashRouter>
   );
 }
